@@ -73,7 +73,21 @@ namespace RequestResponse
                 async (message, cancellationToken) =>
                 {
                     LogWorker($"{threadId} received a reply message from '{RequestQueueName}' with replyToSessionId='{message.ReplyToSessionId}'", "receive", message);
-                    await SendToReply(threadId, message);
+                    var connectionStringBuilder = new ServiceBusConnectionStringBuilder(message.ReplyTo);
+                    var replyToQueue = new MessageSender(connectionStringBuilder);
+                    var replyMessage = new Message(Encoding.UTF8.GetBytes($"processed by {threadId}"))
+                    {
+                        CorrelationId = message.MessageId,
+                        SessionId = message.ReplyToSessionId,
+                        TimeToLive = TimeSpan.FromMinutes(2)
+                    };
+
+                    /****  Simulate an action   *****/
+                    await Task.Delay(new Random().Next(1000, 2000), cancellationToken);
+                    /*******************************/
+
+                    LogWorker($"{threadId} send a reply message to '{connectionStringBuilder.EntityPath}' with sessionId='{message.ReplyToSessionId}'", "send", replyMessage);
+                    await replyToQueue.SendAsync(replyMessage);
                 },
                 new MessageHandlerOptions(args => throw args.Exception)
                 {
@@ -81,24 +95,6 @@ namespace RequestResponse
                 });
         }
 
-        private static async Task SendToReply(string threadId, Message message)
-        {
-            var connectionStringBuilder = new ServiceBusConnectionStringBuilder(message.ReplyTo);
-            var replyToQueue = new MessageSender(connectionStringBuilder);
-            var replyMessage = new Message(Encoding.UTF8.GetBytes($"processed by {threadId}"))
-            {
-                CorrelationId = message.MessageId,
-                SessionId = message.ReplyToSessionId,
-                TimeToLive = TimeSpan.FromMinutes(2)
-            };
-
-            /****  Simulate an action   *****/
-            await Task.Delay(new Random().Next(1000, 2000));
-            /*******************************/
-
-            LogWorker($"{threadId} send a reply message to '{connectionStringBuilder.EntityPath}' with sessionId='{message.ReplyToSessionId}'", "send", replyMessage);
-            await replyToQueue.SendAsync(replyMessage);
-        }
 
         #region helper 
 
