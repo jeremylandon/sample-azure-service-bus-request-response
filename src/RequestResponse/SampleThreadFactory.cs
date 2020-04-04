@@ -13,8 +13,9 @@ namespace RequestResponse
         {
             return new Thread(async () =>
             {
+                /*** send message ***/
                 var messageSender = new MessageSender(connectionString, requestQueueName);
-                var sessionId = Guid.NewGuid().ToString();
+                var sessionId = "session-" + threadId;
 
                 var message = new Message
                 {
@@ -25,15 +26,25 @@ namespace RequestResponse
                 };
 
                 LogClient($"{threadId} send a message to '{requestQueueName}' with replyToSessionId='{message.ReplyToSessionId}' and entityPath='{replyQueueName}'", "send", message);
+                
                 await messageSender.SendAsync(message);
+                await messageSender.CloseAsync();
+                /*** send message ***/
 
+                /*** wait response ***/
                 SessionClient sessionClient = new SessionClient(connectionString, replyQueueName);
                 var session = await sessionClient.AcceptMessageSessionAsync(sessionId);
 
                 LogClient($"{threadId}'s waiting a reply message from '{replyQueueName}' with sessionId='{sessionId}'...", "wait", null);
-                Message sessionMessage = await session.ReceiveAsync();
+                
+                Message sessionMessage = await session.ReceiveAsync(TimeSpan.FromMinutes(2));
 
                 LogClient($"{threadId} received a reply message from '{replyQueueName}' with sessionId='{sessionMessage.SessionId}'", "receive", sessionMessage);
+
+                await session.CompleteAsync(sessionMessage.SystemProperties.LockToken);
+                await session.CloseAsync();
+                await sessionClient.CloseAsync();
+                /*** wait response ***/
             });
         }
 
@@ -47,6 +58,7 @@ namespace RequestResponse
                      async (message, cancellationToken) =>
                      {
                          LogWorker($"{threadId} received a reply message from '{requestQueueName}' with replyToSessionId='{message.ReplyToSessionId}'", "receive", message);
+                         
                          var connectionStringBuilder = new ServiceBusConnectionStringBuilder(message.ReplyTo);
                          var replyToQueue = new MessageSender(connectionStringBuilder);
                          var replyMessage = new Message(Encoding.UTF8.GetBytes($"processed by {threadId}"))
@@ -61,6 +73,7 @@ namespace RequestResponse
                          /*******************************/
 
                          LogWorker($"{threadId} send a reply message to '{connectionStringBuilder.EntityPath}' with sessionId='{message.ReplyToSessionId}'", "send", replyMessage);
+                         
                          await replyToQueue.SendAsync(replyMessage);
                      },
                      new MessageHandlerOptions(args => throw args.Exception)
